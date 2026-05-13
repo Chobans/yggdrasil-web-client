@@ -1,0 +1,69 @@
+/* Calendar styles */
+
+.calendar-wrapper{border:1px solid #e0e0e0;border-radius:8px;padding:16px;background:#fff}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e8e8e8}
+.calendar-day-header{background:#f5f5f5;padding:12px 8px;text-align:center;font-weight:600;font-size:13px;color:#333}
+.calendar-day{background:#fff;padding:8px;min-height:120px;position:relative;overflow:hidden}
+.calendar-day:hover{background:#f0f7ff;cursor:pointer}
+.calendar-day.other-month{background:#fafafa;color:#ccc}
+.calendar-day-number{font-weight:600;margin-bottom:6px;font-size:14px;color:#333}
+.calendar-events{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.calendar-event-block{padding:4px 6px;border-radius:4px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+.calendar-event-block:hover{box-shadow:0 2px 6px rgba(0,0,0,0.15)}
+
+/* Modal styles */
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal-content{background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);max-width:400px;width:90%;animation:slideUp 0.3s ease-out}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid #e0e0e0}
+.modal-header h3{margin:0;font-size:16px;color:#333}
+.modal-close{background:none;border:none;font-size:24px;cursor:pointer;color:#999;padding:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
+.modal-close:hover{color:#333}
+.modal-body{padding:16px}
+.modal-body label{display:block;font-size:13px;color:#555;margin-bottom:8px;font-weight:500}
+.modal-body input{width:100%;padding:8px;border:1px solid #d0d7de;border-radius:4px;font-size:14px;box-sizing:border-box;margin-bottom:12px}
+.modal-body input[type="checkbox"]{width:auto;height:auto;padding:0;margin:0;border:1px solid #9fb3c8;border-radius:3px;box-shadow:none}
+.modal-body input:focus{outline:none;border-color:#007acc;box-shadow:0 0 0 2px rgba(0,122,204,0.1)}
+.modal-footer{display:flex;gap:8px;padding:16px;border-top:1px solid #e0e0e0;justify-content:flex-end}
+.btn-primary{padding:8px 16px;border-radius:6px;border:none;background:#007acc;color:#fff;cursor:pointer;font-size:14px;font-weight:500}
+.btn-primary:hover{background:#0066cc}
+.btn-cancel{padding:8px 16px;border-radius:6px;border:1px solid #d0d7de;background:#fff;color:#333;cursor:pointer;font-size:14px;font-weight:500}
+.btn-cancel:hover{background:#f5f5f5}
+.btn-danger{padding:8px 16px;border-radius:6px;border:none;background:#d32f2f;color:#fff;cursor:pointer;font-size:14px;font-weight:500}
+.btn-danger:hover{background:#b71c1c}
+
+/* Field row: name + color */
+.field-row{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.field-name{flex:1}
+.field-name input{height:40px}
+.field-color{width:72px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.field-color input[type="color"]{width:36px;height:36px;padding:0;border:none;appearance:none;background:transparent;cursor:pointer;border-radius:4px}
+
+/* Editor toolbar and editor */
+.editor-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.editor-toolbar button{padding:6px 10px;border-radius:4px;border:1px solid #d0d7de;background:#fff;cursor:pointer;height:36px;display:flex;align-items:center}
+.editor{min-height:140px;border:1px solid #d0d7de;border-radius:6px;padding:8px;overflow:auto;font-family:Inter, Arial, sans-serif}
+.editor:focus{outline:none;border-color:#007acc;box-shadow:0 0 0 2px rgba(0,122,204,0.06)}
+
+/* Collapsible optional fields block */
+.extra-fields{margin-top:10px;border:1px solid #d0d7de;border-radius:6px;background:#fafcff}
+.extra-fields summary{cursor:pointer;list-style:none;padding:10px 12px;font-weight:600;font-size:13px;color:#2f3b4a;display:flex;align-items:center;justify-content:space-between}
+.extra-fields summary::-webkit-details-marker{display:none}
+.extra-fields summary::after{content:'▾';font-size:11px;color:#58708a;transition:transform .15s ease}
+.extra-fields[open] summary::after{transform:rotate(180deg)}
+.extra-fields-content{padding:0 12px 12px}
+
+/* Ensure editor content doesn't overflow modal */
+.editor img{max-width:100%;height:auto}
+
+/* Prevent modal content from overflowing on small screens and keep consistent width */
+.modal-content{max-width:520px}
+
+/* Ensure inputs/buttons align visually */
+.modal-body input, .modal-body .editor{box-sizing:border-box}
+.modal-body .editor{width:100%}
+
+/* Events list description styling */
+.event-item .ev-desc{color:#444;font-size:13px;margin-top:6px}
+.event-item{display:flex;flex-direction:column;gap:6px}
+.event-item .ev-actions{display:flex;justify-content:flex-end;margin-top:6px}

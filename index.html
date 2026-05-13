@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Уроборос</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="timeline.css">
+  <link rel="stylesheet" href="calendar.css">
+  <script defer src="timeline.js"></script>
+  <script defer src="calendar.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <main class="container">
+    <h1>Иггдрасиль</h1>
+
+    <div class="mode-toggle">
+      <button id="modeTimelineBtn" class="mode-btn active">Временная шкала</button>
+      <button id="modeCalendarBtn" class="mode-btn">Календарь</button>
+    </div>
+
+    <div class="data-toolbar">
+      <div id="jsonFileStatus" class="json-file-status">JSON файл не выбран</div>
+      <div class="data-toolbar-actions">
+        <button id="openJsonBtn" type="button" class="mode-btn">Открыть JSON</button>
+        <button id="saveJsonBtn" type="button" class="mode-btn">Сохранить JSON</button>
+        <button id="saveJsonAsBtn" type="button" class="mode-btn">Сохранить как...</button>
+      </div>
+    </div>
+
+    <div class="workspace-layout">
+      <details class="events-panel" open>
+        <summary>
+          <span class="events-title">События</span>
+          <button id="addEventBtn" type="button" class="add-event-btn" onclick="openCreateEventModal()" aria-label="Создать событие">＋</button>
+        </summary>
+        <div class="events-panel-body">
+          <input id="eventsSearchInput" class="events-search" type="search" placeholder="Поиск по дате или заголовку">
+          <div class="event-form"></div>
+          <div id="eventsList" class="events-list"></div>
+        </div>
+      </details>
+
+      <div class="workspace-main">
+        <div class="controls" id="timelineControls">
+          <div class="nav-buttons">
+            <button id="panLeftBtn" title="Панорамирование влево">◀</button>
+            <button id="panRightBtn" title="Панорамирование вправо">▶</button>
+            <label>Шаг (дни): <input id="stepInput" type="number" min="1" max="365" value="30"></label>
+            <label>Показать:
+              <select id="timelineStatusFilter">
+                <option value="all">Все</option>
+                <option value="active">Активные</option>
+                <option value="completed">Завершенные</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="range-info">Видимый интервал: <span id="rangeLabel"></span></div>
+          <div class="hint">Колёсико мыши — масштаб (приблизить/отдалить), перетаскивание фона — панорамирование, перетаскивание событий ↕ — изменение позиции.</div>
+        </div>
+
+        <div class="controls" id="calendarControls" style="display:none">
+          <div class="nav-buttons">
+            <button id="prevMonthBtn" title="Предыдущий месяц">◀</button>
+            <span id="calendarMonthLabel"></span>
+            <button id="nextMonthBtn" title="Следующий месяц">▶</button>
+            <label>Показать:
+              <select id="calendarStatusFilter">
+                <option value="all">Все</option>
+                <option value="active">Активные</option>
+                <option value="completed">Завершенные</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="chart-wrapper" id="timelineChart">
+          <svg id="chart" width="900" height="300" aria-label="Time series chart"></svg>
+        </div>
+
+        <div id="calendarChart" class="calendar-wrapper" style="display:none">
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Create event (unified) -->
+    <div id="createEventModal" class="modal" style="display:none">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="eventModalTitle">Создать событие</h3>
+          <button class="modal-close" onclick="closeEventModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="date-status-row">
+            <div class="date-field">
+              <label>Дата:</label>
+              <input id="createEventDateInput" type="date">
+            </div>
+            <label class="status-toggle-row status-toggle-main">
+              <span class="status-toggle-title">Завершено</span>
+              <input id="createEventCompleted" type="checkbox">
+            </label>
+          </div>
+          <div class="field-row">
+            <div class="field-name">
+              <label>Название события:</label>
+              <input id="createEventInput" type="text" placeholder="Введите название" autofocus>
+            </div>
+            <div class="field-color">
+              <label>Цвет:</label>
+              <input id="createEventColor" type="color" value="#ff6b6b">
+            </div>
+          </div>
+          <label>Описание:</label>
+          <div class="editor-toolbar" id="createEditorToolbar">
+            <button type="button" data-cmd="bold"><b>B</b></button>
+            <button type="button" data-cmd="italic"><i>I</i></button>
+            <button type="button" data-cmd="createLink">Link</button>
+            <button type="button" data-cmd="insertUnorderedList">• List</button>
+            <button type="button" data-cmd="insertOrderedList">1. List</button>
+            <!-- font selector removed to simplify toolbar -->
+          </div>
+          <div id="createEventDesc" class="editor" contenteditable="true" aria-label="Описание события"></div>
+          <details class="extra-fields">
+            <summary>Дополнительно</summary>
+            <div class="extra-fields-content">
+              <label>Тег:</label>
+              <input id="createEventTag" type="text" placeholder="Необязательное поле">
+              
+              <fieldset class="relationships-fieldset">
+                <legend>Связи между событиями</legend>
+                
+                <div class="relationship-section">
+                  <label class="relationship-label">Предшествующие события:</label>
+                  <div id="predecessorsList" class="relationships-list"></div>
+                </div>
+                
+                <div class="relationship-section">
+                  <label class="relationship-label">Последующие события:</label>
+                  <div id="successorsList" class="relationships-list"></div>
+                </div>
+              </fieldset>
+            </div>
+          </details>
+        </div>
+        <div class="modal-footer">
+          <button id="eventModalDeleteBtn" class="btn-danger" style="display:none" onclick="deleteEventFromModal()">Удалить</button>
+          <button class="btn-cancel" onclick="closeEventModal()">Отмена</button>
+          <button id="eventModalSaveBtn" class="btn-primary" onclick="saveEventFromModal()">Создать</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

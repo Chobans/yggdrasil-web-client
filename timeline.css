@@ -1,0 +1,6 @@
+/* Timeline styles */
+
+.chart-wrapper{overflow:auto}
+svg{width:100%;height:auto;max-height:420px;background:#fff}
+.range-info{margin-top:8px;font-size:13px}
+.hint{margin-top:6px;font-size:12px;color:#666}
