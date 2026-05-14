@@ -23,4 +23,6 @@ jobs:
             cd /home/remote/GitRepo/Yggdrasil/yggdrasil-web-client
 
             echo "⬇️ Pull latest changes"
-            git pull origin main
+            git fetch origin
+            git reset --hard origin/main
+            git clean -fd
