@@ -8,11 +8,11 @@ let viewportDays = 30;
 let centerDate = new Date();
 const MIN_DAYS = 1;
 const MAX_DAYS = 365*200;
-let events = []; // array of {date, name, color, description, tag, predecessorIds[], successorIds[]}
+let events = []; // array of {id, date, name, color, description, tag, predecessorIds[], successorIds[]}
 let viewStatusFilter = 'all'; // all | active | completed
 let currentMode = 'timeline'; // 'timeline' or 'calendar'
 let calendarMonth = new Date(); // current month for calendar view
-let pendingEventIdx = null; // for calendar event editing
+let pendingEventId = null; // for calendar event editing
 let eventModalMode = 'create';
 const chart = $('chart');
 const panLeftBtn = $('panLeftBtn');
@@ -45,172 +45,149 @@ const nextMonthBtn = $('nextMonthBtn');
 const calendarMonthLabel = $('calendarMonthLabel');
 const timelineStatusFilter = $('timelineStatusFilter');
 const calendarStatusFilter = $('calendarStatusFilter');
-const openJsonBtn = $('openJsonBtn');
-const saveJsonBtn = $('saveJsonBtn');
-const saveJsonAsBtn = $('saveJsonAsBtn');
-const jsonFileStatus = $('jsonFileStatus');
-const DATA_FILE_DB_NAME = 'yggdrasil-web-client-file-handle';
-const DATA_FILE_DB_VERSION = 1;
-const DATA_FILE_STORE_NAME = 'fileHandles';
-const DATA_FILE_STORAGE_KEY = 'events';
-let dataFileHandle = null;
-let dataSaveQueue = Promise.resolve();
+const refreshDataBtn = $('refreshDataBtn');
+const saveDataBtn = $('saveDataBtn');
+const syncStatus = $('syncStatus');
+const CALENDAR_API_URL = 'http://localhost:8090/calendar';
+const API_REQUEST_HEADERS = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+let apiSaveQueue = Promise.resolve();
+let nextEventId = 1;
 
-function openDataFileDb(){
-  return new Promise((resolve, reject)=>{
-    const request = indexedDB.open(DATA_FILE_DB_NAME, DATA_FILE_DB_VERSION);
-    request.onupgradeneeded = ()=>{
-      if(!request.result.objectStoreNames.contains(DATA_FILE_STORE_NAME)){
-        request.result.createObjectStore(DATA_FILE_STORE_NAME);
-      }
-    };
-    request.onsuccess = ()=>resolve(request.result);
-    request.onerror = ()=>reject(request.error);
-  });
+function generateEventId(){
+  const eventId = nextEventId;
+  nextEventId += 1;
+  return eventId;
 }
 
-async function persistDataFileHandle(handle){
-  try{
-    const db = await openDataFileDb();
-    return await new Promise((resolve, reject)=>{
-      const tx = db.transaction(DATA_FILE_STORE_NAME, 'readwrite');
-      try{
-        tx.objectStore(DATA_FILE_STORE_NAME).put(handle, DATA_FILE_STORAGE_KEY);
-      }catch(error){
-        if(error && error.name === 'DataCloneError'){
-          console.warn('Handle файла не удалось сохранить в IndexedDB, продолжаем без автоподхвата');
-          resolve();
-          return;
-        }
-        reject(error);
-        return;
-      }
-      tx.oncomplete = ()=>resolve();
-      tx.onerror = ()=>{
-        const error = tx.error;
-        if(error && error.name === 'DataCloneError'){
-          console.warn('Handle файла не удалось сохранить в IndexedDB, продолжаем без автоподхвата');
-          resolve();
-          return;
-        }
-        reject(error || new Error('Не удалось сохранить handle файла'));
-      };
-    });
-  }catch(error){
-    if(error && error.name === 'DataCloneError'){
-      console.warn('Handle файла не удалось сохранить в IndexedDB, продолжаем без автоподхвата');
-      return;
-    }
-    throw error;
-  }
+function syncNextEventIdFromEvents(){
+  const maxEventId = events.reduce((maxId, evt)=>{
+    const eventId = Number(evt && evt.id);
+    return Number.isFinite(eventId) && eventId > maxId ? eventId : maxId;
+  }, 0);
+  nextEventId = maxEventId + 1;
 }
 
-async function restorePersistedDataFileHandle(){
-  try{
-    const db = await openDataFileDb();
-    return await new Promise((resolve, reject)=>{
-      const tx = db.transaction(DATA_FILE_STORE_NAME, 'readonly');
-      const request = tx.objectStore(DATA_FILE_STORE_NAME).get(DATA_FILE_STORAGE_KEY);
-      request.onsuccess = ()=>resolve(request.result || null);
-      request.onerror = ()=>reject(request.error);
-    });
-  }catch(error){
-    console.warn('Не удалось восстановить handle файла', error);
-    return null;
-  }
+function normalizeIdList(value){
+  if(!Array.isArray(value)) return [];
+  return value
+    .map(item => Number(item))
+    .filter(Number.isFinite)
+    .map(item => Math.trunc(item));
 }
 
-function getDataFileDisplayName(handle){
-  if(handle && handle.name) return handle.name;
-  return 'JSON файл не выбран';
+function getEventIndexById(eventId){
+  const numericId = Number(eventId);
+  if(!Number.isFinite(numericId)) return -1;
+  return events.findIndex(event => Number(event.id) === numericId);
 }
 
-function updateJsonFileStatus(text){
-  if(jsonFileStatus) jsonFileStatus.textContent = text;
+function getEventById(eventId){
+  const eventIndex = getEventIndexById(eventId);
+  return eventIndex === -1 ? null : events[eventIndex];
 }
 
-function cloneEventForFile(evt){
+function updateSyncStatus(text){
+  if(syncStatus) syncStatus.textContent = text;
+}
+
+function cloneEventForApi(evt){
+  const eventId = Number.isFinite(evt.id) ? evt.id : generateEventId();
+  if(!Number.isFinite(evt.id)) evt.id = eventId;
   return {
+    id: eventId,
     date: evt.date instanceof Date ? evt.date.toISOString() : evt.date,
     name: evt.name || '',
     color: evt.color || '#ff6b6b',
     description: evt.description || '',
     tag: evt.tag || '',
     status: evt.status === 'completed' ? 'completed' : 'active',
-    predecessorIds: Array.isArray(evt.predecessorIds) ? evt.predecessorIds.slice() : [],
-    successorIds: Array.isArray(evt.successorIds) ? evt.successorIds.slice() : [],
+    predecessorIds: normalizeIdList(evt.predecessorIds),
+    successorIds: normalizeIdList(evt.successorIds),
     verticalOffset: Number.isFinite(evt.verticalOffset) ? evt.verticalOffset : 0
   };
 }
 
 function normalizeLoadedEvent(rawEvt){
+  const numericId = Number(rawEvt && rawEvt.id);
   const date = new Date(rawEvt && rawEvt.date ? rawEvt.date : Date.now());
   if(isNaN(date)) return null;
   return {
+    id: Number.isFinite(numericId) ? Math.trunc(numericId) : generateEventId(),
     date,
     name: String(rawEvt && rawEvt.name ? rawEvt.name : ''),
     color: rawEvt && rawEvt.color ? rawEvt.color : '#ff6b6b',
     description: rawEvt && rawEvt.description ? String(rawEvt.description) : '',
     tag: rawEvt && rawEvt.tag ? String(rawEvt.tag) : '',
     status: rawEvt && rawEvt.status === 'completed' ? 'completed' : 'active',
-    predecessorIds: Array.isArray(rawEvt && rawEvt.predecessorIds) ? rawEvt.predecessorIds.filter(Number.isInteger) : [],
-    successorIds: Array.isArray(rawEvt && rawEvt.successorIds) ? rawEvt.successorIds.filter(Number.isInteger) : [],
+    predecessorIds: normalizeIdList(rawEvt && rawEvt.predecessorIds),
+    successorIds: normalizeIdList(rawEvt && rawEvt.successorIds),
     verticalOffset: Number.isFinite(rawEvt && rawEvt.verticalOffset) ? rawEvt.verticalOffset : 0
   };
 }
 
-function buildFilePayload(){
-  return {
-    version: 1,
-    generatedAt: new Date().toISOString(),
-    events: events.map(cloneEventForFile)
-  };
-}
-
-function parseEventsFromJsonText(text){
-  const parsed = JSON.parse(text);
-  const eventArray = Array.isArray(parsed) ? parsed : Array.isArray(parsed && parsed.events) ? parsed.events : null;
+function normalizeLoadedEvents(rawPayload){
+  const eventArray = Array.isArray(rawPayload) ? rawPayload : Array.isArray(rawPayload && rawPayload.events) ? rawPayload.events : null;
   if(!eventArray) throw new Error('JSON должен содержать массив events');
   return eventArray.map(normalizeLoadedEvent).filter(Boolean);
 }
 
-async function readJsonFileFromHandle(handle){
-  const file = await handle.getFile();
-  const text = await file.text();
-  return parseEventsFromJsonText(text);
+function buildApiPayload(){
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    events: events.map(cloneEventForApi)
+  };
 }
 
-async function writeJsonFileToHandle(handle){
-  const writable = await handle.createWritable();
-  await writable.write(JSON.stringify(buildFilePayload(), null, 2));
-  await writable.close();
+async function fetchEventsFromApi(){
+  const response = await fetch(CALENDAR_API_URL, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json' }
+  });
+  if(!response.ok){
+    throw new Error(`Не удалось загрузить данные календаря: ${response.status}`);
+  }
+  const text = await response.text();
+  if(!text.trim()) return [];
+  return normalizeLoadedEvents(JSON.parse(text));
+}
+
+async function saveEventsToApi(){
+  const formData = new FormData();
+  const jsonData = JSON.stringify(buildApiPayload(), null, 2);
+  const blob = new Blob([jsonData], { type: 'application/json' });
+  formData.append('calendar_data', blob, 'calendar.json');
+  
+  try {
+    updateSyncStatus('Синхронизация...');
+    const response = await fetch(CALENDAR_API_URL, {
+      method: 'POST',
+      body: formData
+    });
+    
+    const responseText = await response.text();
+    if(!response.ok){
+      console.error('Ошибка сохранения:', response.status, responseText);
+      throw new Error(`Ошибка при сохранении (${response.status}): ${responseText}`);
+    }
+    
+    console.log('Календарь успешно сохранён:', responseText);
+    updateSyncStatus('Синхронизировано');
+  } catch (error) {
+    console.error('Ошибка синхронизации:', error);
+    updateSyncStatus('Ошибка синхронизации');
+    throw error;
+  }
 }
 
 function queueDataFileSave(){
-  if(!dataFileHandle) return Promise.resolve();
-  dataSaveQueue = dataSaveQueue
-    .then(()=>writeJsonFileToHandle(dataFileHandle))
+  apiSaveQueue = apiSaveQueue
+    .then(()=>saveEventsToApi())
     .catch(error=>{
-      console.warn('Не удалось сохранить JSON файл', error);
+      console.warn('Не удалось синхронизировать календарь', error);
+      updateSyncStatus('Не удалось синхронизировать изменения');
     });
-  return dataSaveQueue;
-}
-
-function loadLegacyEventsFromLocalStorage(){
-  try{
-    const raw = localStorage.getItem('yggdrasil-web-client.events.v1');
-    if(!raw) return false;
-    const parsed = JSON.parse(raw);
-    const legacyEvents = Array.isArray(parsed) ? parsed : Array.isArray(parsed && parsed.events) ? parsed.events : null;
-    if(!legacyEvents) return false;
-    const loaded = legacyEvents.map(normalizeLoadedEvent).filter(Boolean);
-    events.splice(0, events.length, ...loaded);
-    updateJsonFileStatus('Загружены старые данные. Выберите JSON файл для сохранения');
-    return true;
-  }catch(error){
-    console.warn('Не удалось загрузить legacy данные', error);
-    return false;
-  }
+  return apiSaveQueue;
 }
 
 function ensureEventDefaults(evt){
@@ -282,9 +259,8 @@ if(timelineStatusFilter) timelineStatusFilter.addEventListener('change', (e)=>se
 if(calendarStatusFilter) calendarStatusFilter.addEventListener('change', (e)=>setStatusFilter(e.target.value));
 setStatusFilter('all');
 
-if(openJsonBtn) openJsonBtn.addEventListener('click', ()=>openJsonFile());
-if(saveJsonBtn) saveJsonBtn.addEventListener('click', ()=>saveJsonFile(false));
-if(saveJsonAsBtn) saveJsonAsBtn.addEventListener('click', ()=>saveJsonFile(true));
+if(refreshDataBtn) refreshDataBtn.addEventListener('click', ()=>initializeDataSource());
+if(saveDataBtn) saveDataBtn.addEventListener('click', ()=>saveEventsToApi());
 
 // Timeline navigation
 panLeftBtn.addEventListener('click', ()=>shiftCenterBy(-Number(stepInput.value)));
@@ -370,6 +346,12 @@ function removeEvent(idx){
   } else {
     renderCalendar();
   }
+}
+
+function removeEventById(eventId){
+  const eventIndex = getEventIndexById(eventId);
+  if(eventIndex === -1) return;
+  removeEvent(eventIndex);
 }
 
 // Make removeEvent global for onclick handlers
@@ -469,7 +451,7 @@ function updateRelationshipLists(eventIdx){
   // Build lists of other events grouped by date relationship
   const otherEvents = events
     .map((evt, idx) => ({evt, idx}))
-    .filter(({idx}) => idx !== eventIdx); // exclude current event
+    .filter(({evt}) => evt.id !== (currentEvent && currentEvent.id)); // exclude current event
   
   const predecessorEvents = otherEvents.filter(({evt}) => evt.date < currentDate);
   const successorEvents = otherEvents.filter(({evt}) => evt.date > currentDate);
@@ -481,12 +463,12 @@ function updateRelationshipLists(eventIdx){
   } else {
     predecessorsList.className = 'relationships-list';
     predecessorEvents.forEach(({evt, idx}) => {
-      const isSelected = predecessorIds.includes(idx);
+      const isSelected = predecessorIds.includes(evt.id);
       const item = document.createElement('div');
       item.className = 'relationship-item';
       item.innerHTML = `
-        <input type="checkbox" id="pred-${idx}" data-event-idx="${idx}" ${isSelected ? 'checked' : ''}>
-        <label for="pred-${idx}">
+        <input type="checkbox" id="pred-${evt.id}" data-event-id="${evt.id}" ${isSelected ? 'checked' : ''}>
+        <label for="pred-${evt.id}">
           <span class="event-date-relation">${formatDateShort(evt.date)}</span>
           <span class="event-name-relation">${evt.name}</span>
         </label>
@@ -502,12 +484,12 @@ function updateRelationshipLists(eventIdx){
   } else {
     successorsList.className = 'relationships-list';
     successorEvents.forEach(({evt, idx}) => {
-      const isSelected = successorIds.includes(idx);
+      const isSelected = successorIds.includes(evt.id);
       const item = document.createElement('div');
       item.className = 'relationship-item';
       item.innerHTML = `
-        <input type="checkbox" id="succ-${idx}" data-event-idx="${idx}" ${isSelected ? 'checked' : ''}>
-        <label for="succ-${idx}">
+        <input type="checkbox" id="succ-${evt.id}" data-event-id="${evt.id}" ${isSelected ? 'checked' : ''}>
+        <label for="succ-${evt.id}">
           <span class="event-date-relation">${formatDateShort(evt.date)}</span>
           <span class="event-name-relation">${evt.name}</span>
         </label>
@@ -520,18 +502,18 @@ function updateRelationshipLists(eventIdx){
 function getSelectedRelationships(){
   const selectedPredecessors = Array.from(
     (predecessorsList || {}).querySelectorAll('input[type="checkbox"]:checked')
-  ).map(cb => parseInt(cb.getAttribute('data-event-idx'), 10));
+  ).map(cb => parseInt(cb.getAttribute('data-event-id'), 10));
   
   const selectedSuccessors = Array.from(
     (successorsList || {}).querySelectorAll('input[type="checkbox"]:checked')
-  ).map(cb => parseInt(cb.getAttribute('data-event-idx'), 10));
+  ).map(cb => parseInt(cb.getAttribute('data-event-id'), 10));
   
   return { predecessorIds: selectedPredecessors, successorIds: selectedSuccessors };
 }
 
 function openCreateEventModal(dateStr){
   eventModalMode = 'create';
-  pendingEventIdx = null;
+  pendingEventId = null;
   if(eventModalTitle) eventModalTitle.textContent = 'Создать событие';
   if(eventModalSaveBtn) eventModalSaveBtn.textContent = 'Создать';
   if(eventModalDeleteBtn) eventModalDeleteBtn.style.display = 'none';
@@ -551,7 +533,7 @@ function openCreateEventModal(dateStr){
 }
 
 function closeEventModal(){
-  pendingEventIdx = null;
+  pendingEventId = null;
   if(eventModal) eventModal.style.display = 'none';
 }
 
@@ -574,21 +556,25 @@ function saveEventFromModal(){
     return;
   }
   
-  if(eventModalMode === 'edit' && pendingEventIdx !== null){
-    events[pendingEventIdx].date = eventDate;
-    events[pendingEventIdx].name = name;
-    events[pendingEventIdx].color = color;
-    events[pendingEventIdx].description = desc;
-    events[pendingEventIdx].tag = tag;
-    events[pendingEventIdx].status = status;
-    events[pendingEventIdx].predecessorIds = relationships.predecessorIds;
-    events[pendingEventIdx].successorIds = relationships.successorIds;
+  if(eventModalMode === 'edit' && pendingEventId !== null){
+    const eventIndex = getEventIndexById(pendingEventId);
+    if(eventIndex === -1) return;
+    events[eventIndex].date = eventDate;
+    events[eventIndex].name = name;
+    events[eventIndex].color = color;
+    events[eventIndex].description = desc;
+    events[eventIndex].tag = tag;
+    events[eventIndex].status = status;
+    events[eventIndex].predecessorIds = relationships.predecessorIds;
+    events[eventIndex].successorIds = relationships.successorIds;
     // Preserve verticalOffset on edit
-    if(!events[pendingEventIdx].verticalOffset) events[pendingEventIdx].verticalOffset = 0;
+    if(!events[eventIndex].verticalOffset) events[eventIndex].verticalOffset = 0;
     // Update bidirectional relationships
-    updateBidirectionalRelationships(pendingEventIdx);
+    updateBidirectionalRelationships(events[eventIndex].id);
   } else {
+    const newEventId = generateEventId();
     events.push({
+      id: newEventId,
       date: eventDate, 
       name, 
       color, 
@@ -600,7 +586,7 @@ function saveEventFromModal(){
       verticalOffset: 0
     });
     // Update bidirectional relationships for new event
-    updateBidirectionalRelationships(events.length - 1);
+    updateBidirectionalRelationships(newEventId);
   }
   updateEventsList();
   queueDataFileSave();
@@ -609,138 +595,68 @@ function saveEventFromModal(){
   closeEventModal();
 }
 
-function updateBidirectionalRelationships(eventIdx){
-  const event = events[eventIdx];
+function updateBidirectionalRelationships(eventId){
+  const event = getEventById(eventId);
+  if(!event) return;
   if(!event.predecessorIds) event.predecessorIds = [];
   if(!event.successorIds) event.successorIds = [];
   
   // For each predecessor, ensure this event is in their successors
-  event.predecessorIds.forEach(predIdx => {
-    if(events[predIdx]){
-      if(!events[predIdx].successorIds) events[predIdx].successorIds = [];
-      if(!events[predIdx].successorIds.includes(eventIdx)){
-        events[predIdx].successorIds.push(eventIdx);
+  event.predecessorIds.forEach(predId => {
+    const predecessorEvent = getEventById(predId);
+    if(predecessorEvent){
+      if(!predecessorEvent.successorIds) predecessorEvent.successorIds = [];
+      if(!predecessorEvent.successorIds.includes(event.id)){
+        predecessorEvent.successorIds.push(event.id);
       }
     }
   });
   
   // For each successor, ensure this event is in their predecessors
-  event.successorIds.forEach(succIdx => {
-    if(events[succIdx]){
-      if(!events[succIdx].predecessorIds) events[succIdx].predecessorIds = [];
-      if(!events[succIdx].predecessorIds.includes(eventIdx)){
-        events[succIdx].predecessorIds.push(eventIdx);
+  event.successorIds.forEach(succId => {
+    const successorEvent = getEventById(succId);
+    if(successorEvent){
+      if(!successorEvent.predecessorIds) successorEvent.predecessorIds = [];
+      if(!successorEvent.predecessorIds.includes(event.id)){
+        successorEvent.predecessorIds.push(event.id);
       }
     }
   });
 }
 
-async function ensureJsonFilePermission(handle, mode){
-  if(!handle) return false;
-  if(typeof handle.queryPermission !== 'function' || typeof handle.requestPermission !== 'function') return true;
-  const queryResult = await handle.queryPermission({mode});
-  if(queryResult === 'granted') return true;
-  const requestResult = await handle.requestPermission({mode});
-  return requestResult === 'granted';
-}
-
-async function setCurrentDataFileHandle(handle){
-  dataFileHandle = handle;
-  await persistDataFileHandle(handle);
-  updateJsonFileStatus(`JSON файл: ${getDataFileDisplayName(handle)}`);
-}
-
-async function loadEventsFromDataFileHandle(handle){
-  const loadedEvents = await readJsonFileFromHandle(handle);
+async function setCurrentEventsFromApi(loadedEvents){
   events.splice(0, events.length, ...loadedEvents);
-  await setCurrentDataFileHandle(handle);
+  syncNextEventIdFromEvents();
   updateEventsList();
   if(currentMode === 'timeline' && typeof window.renderChart === 'function') window.renderChart();
   if(currentMode === 'calendar' && typeof window.renderCalendar === 'function') window.renderCalendar();
 }
 
-async function openJsonFile(){
+async function loadEventsFromApi(){
   try{
-    if(window.showOpenFilePicker){
-      const [handle] = await window.showOpenFilePicker({
-        multiple: false,
-        types: [{ description: 'JSON files', accept: {'application/json': ['.json']} }]
-      });
-      if(!handle) return;
-      if(!(await ensureJsonFilePermission(handle, 'read'))){
-        alert('Нет доступа к JSON файлу для чтения');
-        return;
-      }
-      await loadEventsFromDataFileHandle(handle);
-      return;
-    }
-    alert('Этот браузер не поддерживает выбор локального файла для чтения');
+    const loadedEvents = await fetchEventsFromApi();
+    await setCurrentEventsFromApi(loadedEvents);
+    updateSyncStatus('Данные загружены с сервера');
   }catch(error){
-    if(error && error.name !== 'AbortError'){
-      alert('Не удалось открыть JSON файл');
-      console.error(error);
-    }
+    console.warn('Не удалось загрузить календарь с сервера', error);
+    await setCurrentEventsFromApi([]);
+    updateSyncStatus('Не удалось загрузить данные с сервера');
   }
 }
 
-async function saveJsonFile(forceSaveAs = false){
+async function saveEventsToServer(){
   try{
-    if(forceSaveAs || !dataFileHandle){
-      if(!window.showSaveFilePicker){
-        const blob = new Blob([JSON.stringify(buildFilePayload(), null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'yggdrasil-data.json';
-        link.click();
-        URL.revokeObjectURL(url);
-        updateJsonFileStatus('JSON скачан как файл yggdrasil-data.json');
-        return;
-      }
-      const handle = await window.showSaveFilePicker({
-        suggestedName: dataFileHandle && dataFileHandle.name ? dataFileHandle.name : 'yggdrasil-data.json',
-        types: [{ description: 'JSON files', accept: {'application/json': ['.json']} }]
-      });
-      if(!handle) return;
-      if(!(await ensureJsonFilePermission(handle, 'readwrite'))){
-        alert('Нет доступа к JSON файлу для записи');
-        return;
-      }
-      await setCurrentDataFileHandle(handle);
-    } else if(!(await ensureJsonFilePermission(dataFileHandle, 'readwrite'))){
-      alert('Нет доступа к JSON файлу для записи');
-      return;
-    }
-
-    await writeJsonFileToHandle(dataFileHandle);
-    updateJsonFileStatus(`JSON файл: ${getDataFileDisplayName(dataFileHandle)}`);
+    await saveEventsToApi();
+    updateSyncStatus('Изменения сохранены на сервер');
   }catch(error){
-    if(error && error.name !== 'AbortError'){
-      alert('Не удалось сохранить JSON файл');
-      console.error(error);
-    }
+    console.warn('Не удалось сохранить календарь на сервер', error);
+    updateSyncStatus('Не удалось сохранить изменения');
   }
 }
 
 async function initializeDataSource(){
-  const restoredHandle = await restorePersistedDataFileHandle();
-  if(restoredHandle && await ensureJsonFilePermission(restoredHandle, 'read')){
-    try{
-      await loadEventsFromDataFileHandle(restoredHandle);
-      return;
-    }catch(error){
-      console.warn('Не удалось прочитать сохраненный JSON файл', error);
-    }
-  }
-
-  if(loadLegacyEventsFromLocalStorage()){
-    updateEventsList();
-    if(typeof window.renderChart === 'function') window.renderChart();
-    if(typeof window.renderCalendar === 'function' && currentMode === 'calendar') window.renderCalendar();
-    return;
-  }
-
-  updateJsonFileStatus('JSON файл не выбран');
+  updateSyncStatus('Загрузка данных с сервера...');
+  await loadEventsFromApi();
 }
 
 // Editor toolbar helpers using execCommand
@@ -784,16 +700,14 @@ function bindEditorToolbar(toolbarId, editorId, fontNameId, fontSizeId){
 document.addEventListener('DOMContentLoaded', async ()=>{
   bindEditorToolbar('createEditorToolbar','createEventDesc','createFontName','createFontSize');
   await initializeDataSource();
-  updateEventsList();
-  if(typeof window.renderChart === 'function') window.renderChart();
-  if(typeof window.renderCalendar === 'function' && currentMode === 'calendar') window.renderCalendar();
 });
 
 function openEditEventModal(eventIdx){
   const evt = events[eventIdx];
+  if(!evt) return;
   ensureEventDefaults(evt);
   eventModalMode = 'edit';
-  pendingEventIdx = eventIdx;
+  pendingEventId = evt.id;
   if(eventModalTitle) eventModalTitle.textContent = 'Редактировать событие';
   if(eventModalSaveBtn) eventModalSaveBtn.textContent = 'Сохранить';
   if(eventModalDeleteBtn) eventModalDeleteBtn.style.display = 'inline-block';
@@ -809,9 +723,9 @@ function openEditEventModal(eventIdx){
 }
 
 function deleteEventFromModal(){
-  if(pendingEventIdx !== null){
+  if(pendingEventId !== null){
     if(confirm('Удалить событие?')){
-      removeEvent(pendingEventIdx);
+      removeEventById(pendingEventId);
       closeEventModal();
     }
   }
@@ -830,9 +744,12 @@ window.isEventVisibleByStatus = isEventVisibleByStatus;
 window.getVisibleEventsForViews = getVisibleEventsForViews;
 window.saveEventsToStorage = queueDataFileSave;
 window.queueDataFileSave = queueDataFileSave;
-window.openJsonFile = openJsonFile;
-window.saveJsonFile = saveJsonFile;
+window.loadEventsFromApi = loadEventsFromApi;
+window.saveEventsToApi = saveEventsToApi;
 window.initializeDataSource = initializeDataSource;
+window.getEventIndexById = getEventIndexById;
+window.getEventById = getEventById;
+window.removeEventById = removeEventById;
 
 // Close modals on Escape key
 document.addEventListener('keydown', (e)=>{

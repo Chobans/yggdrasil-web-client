@@ -119,7 +119,9 @@ function renderChart(){
   const eventPositions = {}; // map of eventIdx -> {x, y} for drawing relationships
   
   visibleEvents.forEach((evt) => {
-    const globalIdx = events.findIndex(e => e === evt);
+    const globalIdx = typeof window.getEventIndexById === 'function'
+      ? window.getEventIndexById(evt.id)
+      : events.findIndex(e => Number(e.id) === Number(evt.id));
     if(globalIdx === -1) return;
     const dateKey = evt.date.toISOString().slice(0,10);
     if(!eventsByDate[dateKey]) eventsByDate[dateKey] = [];
@@ -146,7 +148,7 @@ function renderChart(){
         }
         
         // Store position for relationship lines
-        eventPositions[globalIdx] = {x, y: yPos, color: evt.color};
+        eventPositions[evt.id] = {x, y: yPos, color: evt.color};
         
         const marker = document.createElementNS(ns,'circle');
         marker.setAttribute('cx', x);
@@ -156,7 +158,7 @@ function renderChart(){
         marker.setAttribute('stroke', '#c92a2a');
         marker.setAttribute('stroke-width','1.5');
         marker.setAttribute('title', evt.name);
-        marker.setAttribute('data-event-idx', globalIdx);
+        marker.setAttribute('data-event-id', evt.id);
         marker.style.cursor = 'grab';
         
         // Add drag handlers
@@ -179,17 +181,19 @@ function renderChart(){
 
   // Draw relationship lines
   visibleEvents.forEach((evt) => {
-    const eventIdx = events.findIndex(e => e === evt);
+    const eventIdx = typeof window.getEventIndexById === 'function'
+      ? window.getEventIndexById(evt.id)
+      : events.findIndex(e => Number(e.id) === Number(evt.id));
     if(eventIdx === -1) return;
     if(!evt.successorIds || evt.successorIds.length === 0) return;
-    if(!eventPositions[eventIdx]) return; // event not visible
+    if(!eventPositions[evt.id]) return; // event not visible
     
-    const fromPos = eventPositions[eventIdx];
+    const fromPos = eventPositions[evt.id];
     
-    evt.successorIds.forEach(succIdx => {
-      if(!eventPositions[succIdx]) return; // successor not visible
+    evt.successorIds.forEach(succId => {
+      if(!eventPositions[succId]) return; // successor not visible
       
-      const toPos = eventPositions[succIdx];
+      const toPos = eventPositions[succId];
       
       // Draw curved line from event to successor
       const line = document.createElementNS(ns, 'path');

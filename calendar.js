@@ -95,7 +95,9 @@ function renderCalendar(){
           eventBlock.title = evt.name + (evt.description ? ' — ' + evt.description : '');
           eventBlock.textContent = evt.name.length > 12 ? evt.name.slice(0, 10) + '...' : evt.name;
           // Find global event index
-          const globalIdx = events.findIndex(e => e === evt);
+          const globalIdx = typeof window.getEventIndexById === 'function'
+            ? window.getEventIndexById(evt.id)
+            : events.findIndex(e => Number(e.id) === Number(evt.id));
           eventBlock.addEventListener('click', (e)=>{
             e.stopPropagation();
             if(globalIdx !== -1){
